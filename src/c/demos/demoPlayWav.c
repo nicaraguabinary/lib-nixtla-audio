@@ -19,7 +19,7 @@
 #endif
 
 #include "nixtla-audio.h"
-#include "../demos/utilLoadWav.c"
+#include "utilLoadWav.c"
 
 int main(int argc, const char * argv[]){
 	STNix_Engine nix;

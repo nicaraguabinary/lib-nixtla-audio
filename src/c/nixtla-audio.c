@@ -14,9 +14,13 @@
 //  Latest fixes enhancements and documentation at https://github.com/nicaraguabinary/nixtla-audio
 //
 
+#define NIX_ASSERTS_ACTIVATED
+
 #include <stdio.h>			//NULL
 #include <string.h>			//memcpy, memset
-#include <assert.h>			//assert
+#ifdef NIX_ASSERTS_ACTIVATED
+	#include <assert.h>			//assert
+#endif
 #include "nixtla-audio.h"
 
 //-------------------------------
@@ -88,6 +92,9 @@
 #ifndef NIX_BUFFERS_GROWTH
 	#define NIX_BUFFERS_GROWTH	1
 #endif
+#ifndef NIX_AUDIO_GROUPS_SIZE
+	#define NIX_AUDIO_GROUPS_SIZE 8
+#endif
 
 
 //++++++++++++++++++++
@@ -101,17 +108,17 @@
 #if defined(__ANDROID__)
 	//#pragma message("COMPILANDO PARA ANDROID")
 	#include <android/log.h>
-	#define PRINTF_INFO(STR_FMT, ...)		__android_log_print(ANDROID_LOG_INFO, "Nixtla", STR_FMT, ##__VA_ARGS__)
+	#define PRINTF_INFO(STR_FMT, ...)		((void)0) //__android_log_print(ANDROID_LOG_INFO, "Nixtla", STR_FMT, ##__VA_ARGS__)
 	#define PRINTF_ERROR(STR_FMT, ...)		__android_log_print(ANDROID_LOG_ERROR, "Nixtla", "ERROR, "STR_FMT, ##__VA_ARGS__)
 	#define PRINTF_WARNING(STR_FMT, ...)	__android_log_print(ANDROID_LOG_WARN, "Nixtla", "WARNING, "STR_FMT, ##__VA_ARGS__)
 #elif defined(__APPLE__) || (defined(__APPLE__) && defined(__MACH__))
 	//#pragma message("COMPILANDO PARA iOS/Mac")
-	#define PRINTF_INFO(STR_FMT, ...)		printf("Nix, " STR_FMT, ##__VA_ARGS__)
+	#define PRINTF_INFO(STR_FMT, ...)		((void)0) //PRINTF_INFO("Nix, " STR_FMT, ##__VA_ARGS__)
 	#define PRINTF_ERROR(STR_FMT, ...)		printf("Nix ERROR, " STR_FMT, ##__VA_ARGS__)
 	#define PRINTF_WARNING(STR_FMT, ...)	printf("Nix WARNING, " STR_FMT, ##__VA_ARGS__)
 #else
 	//#pragma message("(SE ASUME) COMPILANDO PARA BLACKBERRY")
-	#define PRINTF_INFO(STR_FMT, ...)		fprintf(stdout, "Nix, " STR_FMT, ##__VA_ARGS__); fflush(stdout)
+	#define PRINTF_INFO(STR_FMT, ...)		((void)0) //fprintf(stdout, "Nix, " STR_FMT, ##__VA_ARGS__); fflush(stdout)
 	#define PRINTF_ERROR(STR_FMT, ...)		fprintf(stderr, "Nix ERROR, " STR_FMT, ##__VA_ARGS__); fflush(stderr)
 	#define PRINTF_WARNING(STR_FMT, ...)	fprintf(stdout, "Nix WARNING, " STR_FMT, ##__VA_ARGS__); fflush(stdout)
 #endif
@@ -120,7 +127,11 @@
 //-- BASIC DEFINITIONS
 //-------------------------------
 
-#define NIX_ASSERT(EVAL)			{ if(!(EVAL)){ PRINTF_ERROR("ASSERT, cond '"#EVAL"'.\n"); PRINTF_ERROR("ASSERT, file '%s'\n", __FILE__); PRINTF_ERROR("ASSERT, line %d.\n", __LINE__); assert(0); }}
+#ifdef NIX_ASSERTS_ACTIVATED
+	#define NIX_ASSERT(EVAL)			{ if(!(EVAL)){ PRINTF_ERROR("ASSERT, cond '"#EVAL"'.\n"); PRINTF_ERROR("ASSERT, file '%s'\n", __FILE__); PRINTF_ERROR("ASSERT, line %d.\n", __LINE__); assert(0); }}
+#else
+	#define NIX_ASSERT(EVAL)			((void)0);
+#endif
 
 #define STR_ERROR_AL(idError) alGetString(idError) //(idError==AL_INVALID_NAME?"AL_INVALID_NAME":idError==AL_INVALID_ENUM?"AL_INVALID_ENUM":idError==AL_INVALID_VALUE?"AL_INVALID_VALUE":idError==AL_INVALID_OPERATION?"AL_INVALID_OPERATION":idError==AL_OUT_OF_MEMORY?"AL_OUT_OF_MEMORY":idError==AL_NO_ERROR?"AL_NO_ERROR":"AL_ERROR_DESCONOCIDO")
 #define VERIFICA_ERROR_AL(nomFunc) 	{ ALenum idErrorAL=alGetError(); if(idErrorAL!=AL_NO_ERROR){ PRINTF_ERROR("'%s' (#%d) en %s\n", STR_ERROR_AL(idErrorAL), idErrorAL, nomFunc);} NIX_ASSERT(idErrorAL==AL_NO_ERROR);}
@@ -269,6 +280,16 @@ typedef struct STNix_EngineObjetcs_ {
 	void*				buffersCaptureCallbackUserData;
 } STNix_EngineObjetcs;
 
+//-------------------------------
+//-- AUDIO GROUPS
+//-------------------------------
+typedef struct STNix_AudioGroup_ {
+	NixBOOL				enabled;
+	float				volume;
+} STNix_AudioGroup;
+
+STNix_AudioGroup __nixSrcGroups[NIX_AUDIO_GROUPS_SIZE];
+
 #ifdef NIX_OPENAL
 void	__nixSreamsOpenALRemoveProcecedBuffers(STNix_Engine* engAbs); //OpenAL specific
 void	__nixCaptureOpenALMoveSamplesToBuffers(STNix_Engine* engAbs); //OpenAL specific
@@ -301,7 +322,8 @@ void	__nixSrcQueueSetUniqueBuffer(STNix_source* src, STNix_bufferAL* buffer, con
 void	__nixSrcQueueAddStreamBuffer(STNix_source* src, STNix_bufferAL* buffer, const NixUI16 buffIndex);
 void	__nixSrcQueueAddBuffer(STNix_source* src, STNix_bufferAL* buffer, const NixUI16 buffIndex);
 void	__nixSrcQueueClear(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex);
-void	__nixSrcQueueRemoveBuffers(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromOldest);
+void	__nixSrcQueueRemoveBuffersOldest(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromOldest);
+void	__nixSrcQueueRemoveBuffersNewest(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromNewest);
 
 //++++++++++++++++++
 //++++++++++++++++++
@@ -350,11 +372,11 @@ NixUI16 __nixBufferCreate(STNix_EngineObjetcs* eng){
 	audioBuffer.bufferDesc.dataPointer	= NULL;
 	#ifdef NIX_OPENAL
 	{
-		ALuint idBufferOpenAL; ALenum errorAL;
+		ALuint idBufferOpenAL = 0; ALenum errorAL;
 		alGenBuffers(1, &idBufferOpenAL); //el ID=0 es valido en OpenAL (no usar '0' para validar los IDs)
 		errorAL = alGetError();
-		if(errorAL!=AL_NONE){
-			PRINTF_ERROR("alGenBuffers failed: #%d '%s'\n", errorAL, STR_ERROR_AL(errorAL));
+		if(errorAL != AL_NONE){
+			PRINTF_ERROR("alGenBuffers failed: #%d '%s' idBufferAL(%d)\n", errorAL, STR_ERROR_AL(errorAL), idBufferOpenAL);
 			return 0;
 		} else {
 			audioBuffer.idBufferAL = idBufferOpenAL;
@@ -480,13 +502,13 @@ void __nixSourceInit(STNix_source* src){
 	src->sourceFormat.channels		= 0;
 	src->sourceFormat.samplerate	= 0;
 	#endif
-	src->regInUse				= NIX_TRUE;
-	src->sourceType				= ENNixSourceType_Undefined;
+	src->regInUse					= NIX_TRUE;
+	src->sourceType					= ENNixSourceType_Undefined;
 	src->sourceState				= ENNixSourceState_Stopped;
 	src->audioGroupIndex			= 0;
-	src->volume			= 1.0f;
+	src->volume						= 1.0f;
 	//
-	src->isReusable				= NIX_FALSE;
+	src->isReusable					= NIX_FALSE;
 	src->retainCount				= 1; //retained by creator
 	src->releaseCallBack			= NULL;
 	src->releaseCallBackUserData	= NULL;
@@ -495,7 +517,7 @@ void __nixSourceInit(STNix_source* src){
 	src->queueBuffIndexesUse		= 0;
 	src->queueBuffIndexesSize		= 0;
 	//
-	src->buffStreamUnqueuedCount = 0;
+	src->buffStreamUnqueuedCount	= 0;
 }
 
 NixUI16 __nixSourceAdd(STNix_EngineObjetcs* eng, STNix_source* source){
@@ -621,15 +643,17 @@ void __nixSrcQueueAddBuffer(STNix_source* src, STNix_bufferAL* buffer, const Nix
 	}
 	src->queueBuffIndexes[src->queueBuffIndexesUse++] = buffIndex;
 	__nixBufferRetain(buffer);
+	buffer->bufferDesc.state = ENNixBufferState_AttachedForPlay;
 }
 
 void __nixSrcQueueClear(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex){
-	__nixSrcQueueRemoveBuffers(eng, src, sourceIndex, src->queueBuffIndexesUse);
+	__nixSrcQueueRemoveBuffersOldest(eng, src, sourceIndex, src->queueBuffIndexesUse);
 }
 
-void __nixSrcQueueRemoveBuffers(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromOldest){
+void __nixSrcQueueRemoveBuffersOldest(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromOldest){
 	NixUI32 i;
 	NIX_ASSERT(buffersCountFromOldest <= src->queueBuffIndexesUse)
+	PRINTF_INFO("Source(%d), unqueueing %d of %d buffers.\n", sourceIndex, buffersCountFromOldest, src->queueBuffIndexesUse);
 	if(buffersCountFromOldest > src->queueBuffIndexesUse) buffersCountFromOldest = src->queueBuffIndexesUse;
 	//Release buffers
 	for(i=0; i<buffersCountFromOldest; i++){
@@ -649,7 +673,35 @@ void __nixSrcQueueRemoveBuffers(STNix_EngineObjetcs* eng, STNix_source* src, con
 	for(i=0; i<src->queueBuffIndexesUse; i++){
 		src->queueBuffIndexes[i] = src->queueBuffIndexes[i + buffersCountFromOldest];
 	}
-	if(src->queueBuffIndexesUse==0) src->sourceType = ENNixSourceType_Undefined;
+	if(src->queueBuffIndexesUse==0){
+		PRINTF_INFO("Source(%d) empty queue, changed from type(%d) to (%d 'Undefined')", sourceIndex, src->sourceType, ENNixSourceType_Undefined);
+		src->sourceType = ENNixSourceType_Undefined;
+	}
+}
+
+void __nixSrcQueueRemoveBuffersNewest(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI16 sourceIndex, NixUI32 buffersCountFromNewest){
+	NixUI32 i;
+	NIX_ASSERT(buffersCountFromNewest <= src->queueBuffIndexesUse)
+	PRINTF_INFO("Source(%d), unqueueing %d of %d buffers.\n", sourceIndex, buffersCountFromNewest, src->queueBuffIndexesUse);
+	if(buffersCountFromNewest > src->queueBuffIndexesUse) buffersCountFromNewest = src->queueBuffIndexesUse;
+	//Release buffers
+	for(i=(src->queueBuffIndexesUse - buffersCountFromNewest); i<src->queueBuffIndexesUse; i++){
+		const NixUI16 buffIndex	= src->queueBuffIndexes[i];
+		NIX_GET_BUFFER_START(eng, buffIndex, buffer){
+			PRINTF_INFO("Unqueueing source(%d) buffer(%d, retainCount=%d) from queue.\n", sourceIndex, buffIndex, buffer->retainCount);
+			NIX_ASSERT(buffer->bufferDesc.state == ENNixBufferState_AttachedForPlay)
+			buffer->bufferDesc.state	= ENNixBufferState_LoadedForPlay;
+			#ifdef NIX_OPENAL
+			alSourceUnqueueBuffers(src->idSourceAL, 1, &buffer->idBufferAL); VERIFICA_ERROR_AL("alSourceUnqueueBuffers");
+			#endif
+			__nixBufferRelease(buffer, buffIndex);
+		} NIX_GET_BUFFER_END
+	}
+	src->queueBuffIndexesUse -= buffersCountFromNewest;
+	if(src->queueBuffIndexesUse==0){
+		PRINTF_INFO("Source(%d) empty queue, changed from type(%d) to (%d 'Undefined')", sourceIndex, src->sourceType, ENNixSourceType_Undefined);
+		src->sourceType = ENNixSourceType_Undefined;
+	}
 }
 
 NixUI16 __nixSrcQueueFirstBuffer(STNix_source* src){
@@ -696,6 +748,14 @@ NixUI8 nixInit(STNix_Engine* engAbs, const NixUI16 pregeneratedSources){
 	eng->buffersCaptureArrFirst	= 0;
 	eng->buffersCaptureArrFilledCount = 0;
 	eng->buffersCaptureArrSize		= 0;
+	//Audio groups
+	{
+		NixUI16 i;
+		for(i=0; i<NIX_AUDIO_GROUPS_SIZE; i++){
+			__nixSrcGroups[i].enabled	= NIX_TRUE;
+			__nixSrcGroups[i].volume	= 1.0f;
+		}
+	}
 	//
 	#ifdef NIX_OPENAL
 	eng->deviceAL			= alcOpenDevice(NULL);
@@ -997,18 +1057,21 @@ void nixTick(STNix_Engine* engAbs){
 		for(iSrc=1; iSrc<useSrc; iSrc++){ //Source index zero is reserved
 			STNix_source* source = &eng->sourcesArr[iSrc];
 			if(source->regInUse && source->retainCount!=0){
-				if(source->sourceType==ENNixSourceType_Stream){
+				//if(source->sourceType==ENNixSourceType_Stream){ //Do not validate 'sourceType' because when all buffers are removed from source, it is restored to 'typeUndefined', (ex: when a 'tick' takes too long)
 					const NixUI16 unqueuedCount = source->buffStreamUnqueuedCount; //Create and evaluate a copy variable, in case another thread modify the value
 					if(unqueuedCount != 0){
+						PRINTF_INFO("Queue, removing ant invoquien callback for %d unqueued buffers.\n", unqueuedCount);
+						//OpenSL specific, remove from queue (this allows execution thread control)
+						#ifdef NIX_OPENSL
+						__nixSrcQueueRemoveBuffersOldest(eng, source, iSrc, unqueuedCount);
+						#endif
 						//Callback
-						if(source->bufferUnqueuedCallback!=NULL){
-							(*source->bufferUnqueuedCallback)(engAbs, source->bufferUnqueuedCallbackData, iSrc, unqueuedCount);
-						}
+						if(source->bufferUnqueuedCallback!=NULL){ (*source->bufferUnqueuedCallback)(engAbs, source->bufferUnqueuedCallbackData, iSrc, unqueuedCount); }
 						//
 						NIX_ASSERT(unqueuedCount <= source->buffStreamUnqueuedCount)
 						source->buffStreamUnqueuedCount -= unqueuedCount;
 					}
-				}
+				//}
 			}
 		}
 	}
@@ -1032,6 +1095,7 @@ NixUI16 __nixSourceAssign(STNix_Engine* engAbs, NixUI8 lookIntoReusable, NixUI8 
 		for(i=1; i<useCount; i++){ //Source index zero is reserved
 			STNix_source* source = &eng->sourcesArr[i];
 			if(source->regInUse && source->retainCount==0 && source->isReusable){
+				STNix_AudioGroup* grp		= &__nixSrcGroups[audioGroupIndex];
 				NIX_ASSERT(source->sourceState==ENNixSourceState_Stopped)
 				NIX_ASSERT(source->queueBuffIndexesUse==0)
 				if(source->releaseCallBack!=NULL) (*source->releaseCallBack)(engAbs, source->releaseCallBackUserData, i);
@@ -1044,7 +1108,14 @@ NixUI16 __nixSourceAssign(STNix_Engine* engAbs, NixUI8 lookIntoReusable, NixUI8 
 				source->slQueueSize					= queueSize;
 				#endif
 				__nixSourceRetain(source);
-				//PENDIENTE: resetear volumen
+				#ifdef NIX_OPENAL
+				alSourcef(source->idSourceAL, AL_GAIN, source->volume * (grp->enabled ? grp->volume : 0.0f));
+				VERIFICA_ERROR_AL("alSourcef(AL_GAIN)");
+				#elif defined(NIX_OPENSL)
+				if(source->volumeIntf!=NULL){
+					(*source->volumeIntf)->SetVolumeLevel(source->volumeIntf, SL_MILLIBEL_MIN + ((source->volumeMax - SL_MILLIBEL_MIN) * source->volume * (grp->enabled ? grp->volume : 0.0f)));
+				}
+				#endif
 				return i;
 			}
 		}
@@ -1061,10 +1132,10 @@ NixUI16 __nixSourceAssign(STNix_Engine* engAbs, NixUI8 lookIntoReusable, NixUI8 
 			NixUI16 newSourceIndex;
 			STNix_source audioSource;
 			__nixSourceInit(&audioSource);
-			audioSource.idSourceAL				= idFuenteAL;
-			audioSource.audioGroupIndex			= audioGroupIndex;
-			audioSource.releaseCallBack			= releaseCallBack;
-			audioSource.releaseCallBackUserData	= releaseCallBackUserData;
+			audioSource.idSourceAL					= idFuenteAL;
+			audioSource.audioGroupIndex				= audioGroupIndex;
+			audioSource.releaseCallBack				= releaseCallBack;
+			audioSource.releaseCallBackUserData		= releaseCallBackUserData;
 			audioSource.bufferUnqueuedCallback		= bufferUnqueueCallback;
 			audioSource.bufferUnqueuedCallbackData	= bufferUnqueueCallbackData;
 			NIX_ASSERT(audioSource.regInUse)
@@ -1072,7 +1143,9 @@ NixUI16 __nixSourceAssign(STNix_Engine* engAbs, NixUI8 lookIntoReusable, NixUI8 
 			if(newSourceIndex==0){
 				alDeleteSources(1, &idFuenteAL); VERIFICA_ERROR_AL("alDeleteSources");
 			} else {
-				//PENDIENTE: resetear volumen
+				STNix_AudioGroup* grp		= &__nixSrcGroups[audioGroupIndex];
+				alSourcef(audioSource.idSourceAL, AL_GAIN, audioSource.volume * (grp->enabled ? grp->volume : 0.0f));
+				VERIFICA_ERROR_AL("alSourcef(AL_GAIN)");
 				return newSourceIndex;
 			}
 		}
@@ -1083,14 +1156,17 @@ NixUI16 __nixSourceAssign(STNix_Engine* engAbs, NixUI8 lookIntoReusable, NixUI8 
 		STNix_source audioSource;
 		__nixSourceInit(&audioSource);
 		audioSource.slQueueSize					= queueSize;
-		audioSource.audioGroupIndex			= audioGroupIndex;
-		audioSource.releaseCallBack			= releaseCallBack;
-		audioSource.releaseCallBackUserData	= releaseCallBackUserData;
+		audioSource.audioGroupIndex				= audioGroupIndex;
+		audioSource.releaseCallBack				= releaseCallBack;
+		audioSource.releaseCallBackUserData		= releaseCallBackUserData;
 		audioSource.bufferUnqueuedCallback		= bufferUnqueueCallback;
 		audioSource.bufferUnqueuedCallbackData	= bufferUnqueueCallbackData;
 		newSourceIndex = __nixSourceAdd(eng, &audioSource);
 		if(newSourceIndex!=0){
-			//PENDIENTE: resetear volumen
+			STNix_AudioGroup* grp		= &__nixSrcGroups[audioGroupIndex];
+			if(audioSource.volumeIntf!=NULL){
+				(*audioSource.volumeIntf)->SetVolumeLevel(audioSource.volumeIntf, SL_MILLIBEL_MIN + ((audioSource.volumeMax - SL_MILLIBEL_MIN) * audioSource.volume * (grp->enabled ? grp->volume : 0.0f)));
+			}
 			NIX_ASSERT(eng->sourcesArr[newSourceIndex].regInUse)
 			return newSourceIndex;
 		}
@@ -1201,15 +1277,16 @@ NixFLOAT nixSourceGetVoume(STNix_Engine* engAbs, const NixUI16 sourceIndex){
 void nixSourceSetVolume(STNix_Engine* engAbs, const NixUI16 sourceIndex, const float volume){
 	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
 	NIX_GET_SOURCE_START(eng, sourceIndex, source) {
+		STNix_AudioGroup* grp = &__nixSrcGroups[source->audioGroupIndex];
 		source->volume = volume;
 		//PENDIENTE HABILITAR GRUPOS DE AUDIO
 		//NBASSERT(fuenteAL->_indiceGrupoAudio>=0 && fuenteAL->_indiceGrupoAudio<NBAUDIO_CONTEO_GRUPOS_AUDIO)
 		#ifdef NIX_OPENAL
-		alSourcef(source->idSourceAL, AL_GAIN, volume /** _propsGruposSonidos[fuenteAL->_indiceGrupoAudio].multiplicadorVolumen * (_propsGruposSonidos[fuenteAL->_indiceGrupoAudio].habilitado?1.0f:0.0f)*/);
+		alSourcef(source->idSourceAL, AL_GAIN, volume * (grp->enabled ? grp->volume : 0.0f));
 		VERIFICA_ERROR_AL("alSourcef(AL_GAIN)");
 		#elif defined(NIX_OPENSL)
 		if(source->volumeIntf!=NULL){
-			(*source->volumeIntf)->SetVolumeLevel(source->volumeIntf, SL_MILLIBEL_MIN + ((source->volumeMax - SL_MILLIBEL_MIN) * volume));
+			(*source->volumeIntf)->SetVolumeLevel(source->volumeIntf, SL_MILLIBEL_MIN + ((source->volumeMax - SL_MILLIBEL_MIN) * volume * (grp->enabled ? grp->volume : 0.0f)));
 		}
 		#endif
 	} NIX_GET_SOURCE_END
@@ -1333,70 +1410,71 @@ NixBOOL nixSourceSetBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, cons
 	PRINTF_INFO("Queuing source(%d) buffer(%d).\n", sourceIndex, bufferIndex);
 	NIX_GET_SOURCE_START(eng, sourceIndex, source) {
 		__nixSrcQueueClear(eng, source, sourceIndex);
-		NIX_GET_BUFFER_START(eng, bufferIndex, buffer) {
+		if(bufferIndex==0){
+			//Set buffer to NONE (default if the above failed)
 			#ifdef NIX_OPENAL
-			//Set buffer
-			alSourcei(source->idSourceAL, AL_BUFFER, buffer->idBufferAL);
-			if(alGetError()!=AL_NONE){
-				NIX_ASSERT(NIX_FALSE)
-			} else {
-				PRINTF_INFO("Queued source(%d) buffer(%d).\n", sourceIndex, bufferIndex);
-				__nixSrcQueueSetUniqueBuffer(source, buffer, bufferIndex);
-				buffer->bufferDesc.state = ENNixBufferState_AttachedForPlay;
-				//Play if its playing
-				if(source->sourceState == ENNixSourceState_Playing){
-					ALint sourceState;
-					alGetSourcei(source->idSourceAL, AL_SOURCE_STATE, &sourceState);	VERIFICA_ERROR_AL("alGetSourcei(AL_SOURCE_STATE)");
-					if(sourceState!=AL_PLAYING){
-						alSourcePlay(source->idSourceAL);	VERIFICA_ERROR_AL("alSourcePlay");
+			alSourcei(source->idSourceAL, AL_BUFFER, AL_NONE); VERIFICA_ERROR_AL("alSourcei(AL_BUFFER)");
+			#endif
+			return NIX_TRUE;
+		} else {
+			NIX_GET_BUFFER_START(eng, bufferIndex, buffer) {
+				#ifdef NIX_OPENAL
+				//Set buffer
+				alSourcei(source->idSourceAL, AL_BUFFER, buffer->idBufferAL);
+				if(alGetError()!=AL_NONE){
+					NIX_ASSERT(NIX_FALSE)
+				} else {
+					__nixSrcQueueSetUniqueBuffer(source, buffer, bufferIndex); PRINTF_INFO("Queued STATIC source(%d) buffer(%d) (%d in queue).\n", sourceIndex, streamBufferIndex, source->queueBuffIndexesUse);
+					//Play if its playing
+					if(source->sourceState == ENNixSourceState_Playing){
+						ALint sourceState;
+						alGetSourcei(source->idSourceAL, AL_SOURCE_STATE, &sourceState);	VERIFICA_ERROR_AL("alGetSourcei(AL_SOURCE_STATE)");
+						if(sourceState!=AL_PLAYING){
+							alSourcePlay(source->idSourceAL);	VERIFICA_ERROR_AL("alSourcePlay");
+						}
+					}
+					return NIX_TRUE;
+				}
+				#elif defined(NIX_OPENSL)
+				//Init source (if needed)
+				if(source->slPlayerObject==NULL){
+					if(__nixSourceInitOpenSLPlayer(eng, sourceIndex, source, &buffer->bufferDesc.audioDesc)==NIX_FALSE){
+						PRINTF_ERROR("__nixSourceInitOpenSLPlayer failed.\n");
 					}
 				}
-				return NIX_TRUE;
-			}
-			#elif defined(NIX_OPENSL)
-			//Init source (if needed)
-			if(source->slPlayerObject==NULL){
-				if(__nixSourceInitOpenSLPlayer(eng, sourceIndex, source, &buffer->bufferDesc.audioDesc)==NIX_FALSE){
-					PRINTF_ERROR("__nixSourceInitOpenSLPlayer failed.\n");
-				}
-			}
-			//Verify source and buffer properties
-			if(source->slPlayerObject!=NULL){
-				NIX_ASSERT(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate)
-				if(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate){
-					//Queue buffer
-					NIX_ASSERT(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL)
-					if(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL){
-						if((*source->slPlayerBufferQueue)->Enqueue(source->slPlayerBufferQueue, buffer->bufferDesc.dataPointer, buffer->bufferDesc.dataBytesCount)!=SL_RESULT_SUCCESS){
-							PRINTF_ERROR("OpenSL slPlayerBufferQueue->Enqueue(buffer #%d) failed.\n", (source->queueBuffIndexesUse + 1));
-						} else {
-							PRINTF_INFO("Queued source(%d) buffer(%d).\n", sourceIndex, bufferIndex);
-							__nixSrcQueueSetUniqueBuffer(source, buffer, bufferIndex);
-							buffer->bufferDesc.state = ENNixBufferState_AttachedForPlay;
-							//Play if its playing
-							if(source->sourceState == ENNixSourceState_Playing){
-								SLuint32 playerState;
-								if((*source->slPlayerIntf)->GetPlayState(source->slPlayerIntf, &playerState)!=SL_RESULT_SUCCESS){
-									PRINTF_ERROR("OpenSL slPlayerIntf->GetPlayState() failed.\n");
-									NIX_ASSERT(NIX_FALSE)
-								} else if(playerState!=SL_PLAYSTATE_PLAYING){
-									if((*source->slPlayerIntf)->SetPlayState(source->slPlayerIntf, SL_PLAYSTATE_PLAYING)!=SL_RESULT_SUCCESS){
-										PRINTF_ERROR("OpenSL slPlayerIntf->SetPlayState(SL_PLAYSTATE_PLAYING) failed.\n");
+				//Verify source and buffer properties
+				if(source->slPlayerObject!=NULL){
+					NIX_ASSERT(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate)
+					if(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate){
+						NIX_ASSERT(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL)
+						if(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL){
+							//Queue bufferIndex (it is important to add the bufferIndex before 'sl->Enqueue' because the callbacks)
+							__nixSrcQueueSetUniqueBuffer(source, buffer, bufferIndex); PRINTF_INFO("Queued STATIC source(%d) buffer(%d) (%d in queue).\n", sourceIndex, bufferIndex, source->queueBuffIndexesUse);
+							//Queue slBuffer
+							if((*source->slPlayerBufferQueue)->Enqueue(source->slPlayerBufferQueue, buffer->bufferDesc.dataPointer, buffer->bufferDesc.dataBytesCount)!=SL_RESULT_SUCCESS){
+								PRINTF_ERROR("OpenSL slPlayerBufferQueue->Enqueue(buffer #%d of) failed.\n", (source->queueBuffIndexesUse + 1), source->slQueueSize);
+								__nixSrcQueueRemoveBuffersNewest(eng, source, sourceIndex, 1);
+							} else {
+								//Play if its playing
+								if(source->sourceState == ENNixSourceState_Playing){
+									SLuint32 playerState;
+									if((*source->slPlayerIntf)->GetPlayState(source->slPlayerIntf, &playerState)!=SL_RESULT_SUCCESS){
+										PRINTF_ERROR("OpenSL slPlayerIntf->GetPlayState() failed.\n");
+										NIX_ASSERT(NIX_FALSE)
+									} else if(playerState!=SL_PLAYSTATE_PLAYING){
+										if((*source->slPlayerIntf)->SetPlayState(source->slPlayerIntf, SL_PLAYSTATE_PLAYING)!=SL_RESULT_SUCCESS){
+											PRINTF_ERROR("OpenSL slPlayerIntf->SetPlayState(SL_PLAYSTATE_PLAYING) failed.\n");
+										}
 									}
 								}
+								return NIX_TRUE;
 							}
-							return NIX_TRUE;
 						}
 					}
 				}
-			}
-			#endif
-		} NIX_GET_BUFFER_END
-		//Set buffer to NONE (default if the above failed)
-		#ifdef NIX_OPENAL
-		alSourcei(source->idSourceAL, AL_BUFFER, AL_NONE); VERIFICA_ERROR_AL("alSourcei(AL_BUFFER)");
-		#endif
-		return (bufferIndex==0);
+				#endif
+			} NIX_GET_BUFFER_END
+		} //if(bufferIndex==0){
 	} NIX_GET_SOURCE_END
 	return NIX_FALSE;
 }
@@ -1414,9 +1492,7 @@ NixBOOL nixSourceStreamAppendBuffer(STNix_Engine* engAbs, const NixUI16 sourceIn
 				if(errorAL!=AL_NONE){
 					PRINTF_ERROR("ERROR '%s' alSourceQueueBuffers\n", STR_ERROR_AL(errorAL)); NIX_ASSERT(0)
 				} else {
-					PRINTF_INFO("Queued source(%d) buffer(%d).\n", sourceIndex, streamBufferIndex);
-					__nixSrcQueueAddStreamBuffer(source, buffer, streamBufferIndex);
-					buffer->bufferDesc.state = ENNixBufferState_AttachedForPlay;
+					__nixSrcQueueAddStreamBuffer(source, buffer, streamBufferIndex); PRINTF_INFO("Queued STREAM source(%d) buffer(%d) (%d in queue).\n", sourceIndex, streamBufferIndex, source->queueBuffIndexesUse);
 					if(source->sourceState == ENNixSourceState_Playing){
 						//Play if its playing
 						ALint sourceState;
@@ -1438,16 +1514,15 @@ NixBOOL nixSourceStreamAppendBuffer(STNix_Engine* engAbs, const NixUI16 sourceIn
 				if(source->slPlayerObject!=NULL){
 					NIX_ASSERT(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate)
 					if(buffer->bufferDesc.audioDesc.channels==source->sourceFormat.channels && buffer->bufferDesc.audioDesc.bitsPerSample==source->sourceFormat.bitsPerSample && buffer->bufferDesc.audioDesc.samplerate==source->sourceFormat.samplerate){
-						//Queue buffer
 						NIX_ASSERT(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL)
 						if(buffer->bufferDesc.dataBytesCount!=0 && buffer->bufferDesc.dataPointer!=NULL){
+							//Queue bufferIndex (it is important to add the bufferIndex before 'sl->Enqueue' because the callbacks)
+							__nixSrcQueueAddStreamBuffer(source, buffer, streamBufferIndex); PRINTF_INFO("Queued STREAM source(%d) buffer(%d) (%d in queue).\n", sourceIndex, streamBufferIndex, source->queueBuffIndexesUse);
+							//Queue slBuffer
 							if((*source->slPlayerBufferQueue)->Enqueue(source->slPlayerBufferQueue, buffer->bufferDesc.dataPointer, buffer->bufferDesc.dataBytesCount)!=SL_RESULT_SUCCESS){
-								PRINTF_WARNING("OpenSL slPlayerBufferQueue->Enqueue(buffer #%d) failed.\n", (source->queueBuffIndexesUse + 1));
+								PRINTF_WARNING("OpenSL slPlayerBufferQueue->Enqueue(buffer #%d of %d) failed.\n", (source->queueBuffIndexesUse + 1), source->slQueueSize);
+								__nixSrcQueueRemoveBuffersNewest(eng, source, sourceIndex, 1);
 							} else {
-								//Queue buffer
-								PRINTF_INFO("Queued source(%d) buffer(%d).\n", sourceIndex, streamBufferIndex);
-								__nixSrcQueueAddStreamBuffer(source, buffer, streamBufferIndex);
-								buffer->bufferDesc.state = ENNixBufferState_AttachedForPlay;
 								//Play if its playing
 								if(source->sourceState == ENNixSourceState_Playing){
 									SLuint32 playerState;
@@ -1473,43 +1548,67 @@ NixBOOL nixSourceStreamAppendBuffer(STNix_Engine* engAbs, const NixUI16 sourceIn
 }
 
 NixBOOL	nixSrcGroupIsEnabled(STNix_Engine* engAbs, const NixUI8 groupIndex){
-	return NIX_TRUE;
+	NIX_ASSERT(groupIndex < NIX_AUDIO_GROUPS_SIZE)
+	if(groupIndex < NIX_AUDIO_GROUPS_SIZE){
+		return __nixSrcGroups[groupIndex].enabled;
+	}
+	return NIX_FALSE;
 }
 
 NixFLOAT nixSrcGroupGetVolume(STNix_Engine* engAbs, const NixUI8 groupIndex){
-	return 1.0f;
+	NIX_ASSERT(groupIndex < NIX_AUDIO_GROUPS_SIZE)
+	if(groupIndex < NIX_AUDIO_GROUPS_SIZE){
+		return __nixSrcGroups[groupIndex].volume;
+	}
+	return 0.0f;
 }
 
 void nixSrcGroupSetEnabled(STNix_Engine* engAbs, const NixUI8 groupIndex, const NixBOOL enabled){
-	/*
-	 if(_propsGruposSonidos[grupoAudio].habilitado!=habilitado){
-	 _propsGruposSonidos[grupoAudio].habilitado = habilitado;
-	 //
-	 UI32 iFuenteAL, iFuenteALConteo = _fuentesAL->conteo;
-	 for(iFuenteAL=0; iFuenteAL<iFuenteALConteo; iFuenteAL++){
-	 if(_fuentesAL->elemento[iFuenteAL].actualUsuario!=NULL){
-	 AUFuenteAL* fuenteAL = _fuentesAL->elemento[iFuenteAL].fuenteAL;
-	 NBGestorSonidos::fuenteEstablecerVolumen(fuenteAL, fuenteAL->volume); //Actualizar el volumen real en base al volumen relativo
-	 }
-	 }
-	 }
-	 */
+	NIX_ASSERT(groupIndex < NIX_AUDIO_GROUPS_SIZE)
+	if(groupIndex < NIX_AUDIO_GROUPS_SIZE){
+		STNix_AudioGroup* grp		= &__nixSrcGroups[groupIndex];
+		STNix_EngineObjetcs* eng	= (STNix_EngineObjetcs*)engAbs->o;
+		NixUI16 i; const NixUI16 use = eng->sourcesArrUse;
+		for(i=0; i<use; i++){
+			STNix_source* source = &eng->sourcesArr[i];
+			if(source->regInUse && source->audioGroupIndex==groupIndex){
+				#ifdef NIX_OPENAL
+				alSourcef(source->idSourceAL, AL_GAIN, source->volume * (enabled ? grp->volume : 0.0f));
+				VERIFICA_ERROR_AL("alSourcef(AL_GAIN)");
+				#elif defined(NIX_OPENSL)
+				if(source->volumeIntf!=NULL){
+					(*source->volumeIntf)->SetVolumeLevel(source->volumeIntf, SL_MILLIBEL_MIN + ((source->volumeMax - SL_MILLIBEL_MIN) * source->volume * (enabled ? grp->volume : 0.0f)));
+				}
+				#endif
+			}
+		}
+		grp->enabled = enabled;
+	}
 }
 
 void nixSrcGroupSetVolume(STNix_Engine* engAbs, const NixUI8 groupIndex, const NixFLOAT volume){
-	/*
-	 if(_propsGruposSonidos[grupoAudio].multiplicadorVolumen!=multiplicadorVolumen){
-	 _propsGruposSonidos[grupoAudio].multiplicadorVolumen = multiplicadorVolumen;
-	 //
-	 UI32 iFuenteAL, iFuenteALConteo = _fuentesAL->conteo;
-	 for(iFuenteAL=0; iFuenteAL<iFuenteALConteo; iFuenteAL++){
-	 if(_fuentesAL->elemento[iFuenteAL].actualUsuario!=NULL){
-	 AUFuenteAL* fuenteAL = _fuentesAL->elemento[iFuenteAL].fuenteAL;
-	 NBGestorSonidos::fuenteEstablecerVolumen(fuenteAL, fuenteAL->volume); //Actualizar el volumen real en base al volumen relativo
-	 }
-	 }
-	 }
-	 */
+	NIX_ASSERT(groupIndex < NIX_AUDIO_GROUPS_SIZE)
+	if(groupIndex < NIX_AUDIO_GROUPS_SIZE){
+		STNix_AudioGroup* grp		= &__nixSrcGroups[groupIndex];
+		if(grp->enabled){
+			STNix_EngineObjetcs* eng	= (STNix_EngineObjetcs*)engAbs->o;
+			NixUI16 i; const NixUI16 use = eng->sourcesArrUse;
+			for(i=0; i<use; i++){
+				STNix_source* source = &eng->sourcesArr[i];
+				if(source->regInUse && source->audioGroupIndex==groupIndex){
+					#ifdef NIX_OPENAL
+					alSourcef(source->idSourceAL, AL_GAIN, source->volume * volume);
+					VERIFICA_ERROR_AL("alSourcef(AL_GAIN)");
+					#elif defined(NIX_OPENSL)
+					if(source->volumeIntf!=NULL){
+						(*source->volumeIntf)->SetVolumeLevel(source->volumeIntf, SL_MILLIBEL_MIN + ((source->volumeMax - SL_MILLIBEL_MIN) * source->volume * volume));
+					}
+					#endif
+				}
+			}
+		}
+		grp->volume = volume;
+	}
 }
 
 
@@ -1523,38 +1622,46 @@ void __nixSourceBufferQueueSLCallback(SLAndroidSimpleBufferQueueItf bq, void* pP
 			switch (source->sourceType) {
 				case ENNixSourceType_Stream:
 					//STREAM, release oldest buffer
-					__nixSrcQueueRemoveBuffers(eng, source, param->sourceIndex, 1);
-					source->buffStreamUnqueuedCount++;
+					source->buffStreamUnqueuedCount++; //This number will be processed at 'nixTick'
 					break;
 				case ENNixSourceType_Static:
-					//STATIC SOUND, repeat?
-					if(source->repeat){
-						if(source->slPlayerIntf!=NULL){
-							//Source state
-							SLuint32 pState;
-							if((*source->slPlayerIntf)->GetPlayState(source->slPlayerIntf, &pState)!=SL_RESULT_SUCCESS){
-								NIX_ASSERT(0)
-							} else {
-								if(pState==SL_PLAYSTATE_PLAYING){
-									//Queue state
-									SLAndroidSimpleBufferQueueState bufQueueState;
-									if((*source->slPlayerBufferQueue)->GetState(source->slPlayerBufferQueue, &bufQueueState)!=SL_RESULT_SUCCESS){
-										PRINTF_ERROR("OpenSL slPlayerBufferQueue->GetState() failed.\n");
-									} else {
-										NIX_ASSERT(bufQueueState.count==0)
-										if(bufQueueState.count==0){
-											const NixUI16 firtBuffIndex = source->queueBuffIndexes[0];
-											NIX_GET_BUFFER_START(eng, firtBuffIndex, buff){
-												NIX_ASSERT(buff->bufferDesc.dataBytesCount!=0 && buff->bufferDesc.dataPointer!=NULL)
-												if(buff->bufferDesc.dataBytesCount!=0 && buff->bufferDesc.dataPointer!=NULL){
-													if((*source->slPlayerBufferQueue)->Enqueue(source->slPlayerBufferQueue, buff->bufferDesc.dataPointer, buff->bufferDesc.dataBytesCount)!=SL_RESULT_SUCCESS){
-														PRINTF_ERROR("OpenSL slPlayerBufferQueue->Enqueue(FisrtBuffer) failed.\n");
+					{ //Append again the same buffer
+						SLAndroidSimpleBufferQueueState bufQueueState;
+						if((*source->slPlayerBufferQueue)->GetState(source->slPlayerBufferQueue, &bufQueueState)!=SL_RESULT_SUCCESS){
+							PRINTF_ERROR("OpenSL slPlayerBufferQueue->GetState() failed.\n");
+						} else {
+							NIX_ASSERT(bufQueueState.count==0)
+							if(bufQueueState.count==0){
+								const NixUI16 firtBuffIndex = source->queueBuffIndexes[0];
+								NIX_GET_BUFFER_START(eng, firtBuffIndex, buff){
+									NIX_ASSERT(buff->bufferDesc.dataBytesCount!=0 && buff->bufferDesc.dataPointer!=NULL)
+									if(buff->bufferDesc.dataBytesCount!=0 && buff->bufferDesc.dataPointer!=NULL){
+										if((*source->slPlayerBufferQueue)->Enqueue(source->slPlayerBufferQueue, buff->bufferDesc.dataPointer, buff->bufferDesc.dataBytesCount)!=SL_RESULT_SUCCESS){
+											PRINTF_ERROR("OpenSL slPlayerBufferQueue->Enqueue(FisrtBuffer) failed.\n");
+										} else {
+											SLuint32 playerState;
+											PRINTF_INFO("Queued(re) Static SrcIndex(%d) Type(%d) Buffer.\n", param->sourceIndex, source->sourceType);
+											if((*source->slPlayerIntf)->GetPlayState(source->slPlayerIntf, &playerState)!=SL_RESULT_SUCCESS){
+												PRINTF_ERROR("OpenSL slPlayerIntf->GetPlayState() failed.\n"); NIX_ASSERT(NIX_FALSE)
+											} else {
+												if(source->repeat && source->sourceState==ENNixSourceState_Playing){
+													if(playerState!=SL_PLAYSTATE_PLAYING){
+														if((*source->slPlayerIntf)->SetPlayState(source->slPlayerIntf, SL_PLAYSTATE_PLAYING)!=SL_RESULT_SUCCESS){
+															PRINTF_ERROR("OpenSL slPlayerIntf->SetPlayState(SL_PLAYSTATE_PLAYING) failed.\n"); NIX_ASSERT(0)
+														}
 													}
+												} else {
+													if(playerState!=SL_PLAYSTATE_STOPPED){
+														if((*source->slPlayerIntf)->SetPlayState(source->slPlayerIntf, SL_PLAYSTATE_STOPPED)!=SL_RESULT_SUCCESS){
+															PRINTF_ERROR("OpenSL slPlayerIntf->SetPlayState(SL_PLAYSTATE_STOPPED) failed.\n"); NIX_ASSERT(0)
+														}
+													}
+													source->sourceState = ENNixSourceState_Stopped;
 												}
-											} NIX_GET_BUFFER_END
+											}
 										}
 									}
-								}
+								} NIX_GET_BUFFER_END
 							}
 						}
 					}
@@ -1619,12 +1726,16 @@ NixBOOL __nixSourceInitOpenSLPlayer(STNix_EngineObjetcs* eng, const NixUI16 sour
 								if((*slPlayerBufferQueue)->RegisterCallback(slPlayerBufferQueue, __nixSourceBufferQueueSLCallback, callbackParam)!=SL_RESULT_SUCCESS){
 									PRINTF_ERROR("OpenSL slPlayerBufferQueue->RegisterCallback() failed.\n");
 								} else {
+									STNix_AudioGroup* grp		= &__nixSrcGroups[src->audioGroupIndex];
 									src->slPlayerObject			= slPlayerObject;
 									src->slPlayerIntf			= slPlayerIntf;
 									src->volumeIntf				= slVolumeIntf;
 									src->volumeMax				= slVolumeMax;
 									src->slPlayerBufferQueue	= slPlayerBufferQueue;
 									src->sourceFormat			= *audioDesc;
+									if(src->volumeIntf!=NULL){
+										(*src->volumeIntf)->SetVolumeLevel(src->volumeIntf, SL_MILLIBEL_MIN + ((src->volumeMax - SL_MILLIBEL_MIN) * src->volume * (grp->enabled ? grp->volume : 0.0f)));
+									}
 									PRINTF_INFO("source OpenSLObject created(%d).\n", sourceIndex);
 									return NIX_TRUE;
 								}
@@ -1656,8 +1767,8 @@ void __nixSreamsOpenALRemoveProcecedBuffers(STNix_Engine* engAbs){ //OpenAL spec
 				NIX_ASSERT(buffersProcessedCount <= source->queueBuffIndexesUse) //Just checking, this should be always be true
 				if(buffersProcessedCount > 0){
 					//Remove from source's bufferIndex array
-					__nixSrcQueueRemoveBuffers(eng, source, i, buffersProcessedCount);
-					source->buffStreamUnqueuedCount += buffersProcessedCount;
+					__nixSrcQueueRemoveBuffersOldest(eng, source, i, buffersProcessedCount);
+					source->buffStreamUnqueuedCount += buffersProcessedCount; PRINTF_INFO("AL source->buffStreamUnqueuedCount = %d\n", source->buffStreamUnqueuedCount);
 				}
 			}
 		}
@@ -1670,7 +1781,7 @@ void __nixSreamsOpenALRemoveProcecedBuffers(STNix_Engine* engAbs){ //OpenAL spec
 NixUI16 nixBufferWithData(STNix_Engine* engAbs, const STNix_audioDesc* audioDesc, const NixUI8* audioDataPCM, const NixUI32 audioDataPCMBytes){
 	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
 	NixUI16 i; const NixUI16 useCount = eng->buffersArrUse;
-	NIX_ASSERT(eng->buffersArrUse < 25) //TEMPORAL
+	//NIX_ASSERT(eng->buffersArrUse < 25) //TEMPORAL
 	NIX_ASSERT(audioDesc->blockAlign == ((audioDesc->bitsPerSample / 8) * audioDesc->channels))
 	//Look for a available existent buffer
 	{

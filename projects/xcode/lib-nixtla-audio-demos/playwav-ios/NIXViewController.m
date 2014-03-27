@@ -7,7 +7,7 @@
 //
 
 #import "NIXViewController.h"
-#include "utilLoadWav.h"
+#include "utilLoadWav.c"
 
 typedef struct STFileStatus_ {
 	const char* fileName;
