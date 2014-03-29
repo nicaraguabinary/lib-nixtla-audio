@@ -109,6 +109,7 @@ void		nixTick(STNix_Engine* engAbs);
 
 //Buffers
 NixUI16		nixBufferWithData(STNix_Engine* engAbs, const STNix_audioDesc* audioDesc, const NixUI8* audioDataPCM, const NixUI32 audioDataPCMBytes);
+NixBOOL		nixBufferSetData(STNix_Engine* engAbs, const NixUI16 buffIndex, const STNix_audioDesc* audioDesc, const NixUI8* audioDataPCM, const NixUI32 audioDataPCMBytes);
 NixUI32		nixBufferRetainCount(STNix_Engine* engAbs, const NixUI16 buffIndex);
 void		nixBufferRetain(STNix_Engine* engAbs, const NixUI16 buffIndex);
 void		nixBufferRelease(STNix_Engine* engAbs, const NixUI16 buffIndex);
@@ -127,6 +128,7 @@ NixUI32		nixSourceGetBytes(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixFLOAT	nixSourceGetSeconds(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixFLOAT	nixSourceGetVoume(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 void		nixSourceSetVolume(STNix_Engine* engAbs, const NixUI16 sourceIndex, const float volume);
+NixUI16		nixSourceGetBuffersCount(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixUI32		nixSourceGetOffsetSamples(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixUI32		nixSourceGetOffsetBytes(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 void		nixSourceSetOffsetSamples(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI32 offsetSamples);
@@ -137,7 +139,8 @@ void		nixSourceStop(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 void		nixSourceRewind(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixBOOL		nixSourceSetBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 bufferIndex);
 NixBOOL		nixSourceStreamAppendBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 streamBufferIndex);
-
+NixBOOL		nixSourceHaveBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 bufferIndex);
+	
 //Audio groups
 NixBOOL		nixSrcGroupIsEnabled(STNix_Engine* engAbs, const NixUI8 groupIndex);
 NixFLOAT	nixSrcGroupGetVolume(STNix_Engine* engAbs, const NixUI8 groupIndex);
