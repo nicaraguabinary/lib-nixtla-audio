@@ -139,6 +139,7 @@ void		nixSourceStop(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 void		nixSourceRewind(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixBOOL		nixSourceSetBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 bufferIndex);
 NixBOOL		nixSourceStreamAppendBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 streamBufferIndex);
+NixBOOL		nixSourceEmptyQueue(STNix_Engine* engAbs, const NixUI16 sourceIndex);
 NixBOOL		nixSourceHaveBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 bufferIndex);
 	
 //Audio groups
