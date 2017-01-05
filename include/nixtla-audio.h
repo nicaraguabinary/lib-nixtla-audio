@@ -101,7 +101,10 @@ typedef void (*PTRNIX_CaptureBufferFilledCallback)(STNix_Engine* engAbs, void* u
 //Engine
 NixUI8		nixInit(STNix_Engine* engAbs, const NixUI16 pregeneratedSources);
 void		nixFinalize(STNix_Engine* engAbs);
-void		nixGetContext(STNix_Engine* engAbs, void* dest); //"dest" must be a "ALCcontext**" or "SLEngineItf*"
+NixBOOL		nixContextIsActive(STNix_Engine* engAbs);
+NixBOOL		nixContextActivate(STNix_Engine* engAbs);
+NixBOOL		nixContextDeactivate(STNix_Engine* engAbs);
+//void		nixGetContext(STNix_Engine* engAbs, void* dest); //"dest" must be a "ALCcontext**" or "SLEngineItf*"
 void		nixGetStatusDesc(STNix_Engine* engAbs, STNix_StatusDesc* dest);
 NixUI32		nixCapabilities(STNix_Engine* engAbs);
 void		nixPrintCaps(STNix_Engine* engAbs);
@@ -159,6 +162,9 @@ NixUI32		nixCaptureFilledBuffersSamples(STNix_Engine* engAbs);
 float		nixCaptureFilledBuffersSeconds(STNix_Engine* engAbs);
 //Note: when a BufferFilledCallback is defined, the buffers are automatically released after invoking the callback.
 void		nixCaptureFilledBuffersRelease(STNix_Engine* engAbs, NixUI32 quantBuffersToRelease);
+
+//Debug
+void		nixDbgPrintSourcesStatus(STNix_Engine* engAbs);
 
 #ifdef __cplusplus
 }

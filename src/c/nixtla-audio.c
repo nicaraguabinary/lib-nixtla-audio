@@ -112,6 +112,15 @@
 //++++++++++++++++++++
 //++++++++++++++++++++
 
+#if defined(__ANDROID__) //Android
+	#include <android/log.h>
+	#define NIX_PRINTF_ALLWAYS(STR_FMT, ...)		__android_log_print(ANDROID_LOG_INFO, "Nixtla", STR_FMT, ##__VA_ARGS__)
+#elif defined(__QNX__) //BB10
+	#define NIX_PRINTF_ALLWAYS(STR_FMT, ...)		fprintf(stdout, "Nix, " STR_FMT, ##__VA_ARGS__); fflush(stdout)
+#else
+	#define NIX_PRINTF_ALLWAYS(STR_FMT, ...)		printf("Nix, " STR_FMT, ##__VA_ARGS__)
+#endif
+
 #if defined(NIX_SILENT_MODE)
 	#define NIX_PRINTF_INFO(STR_FMT, ...)			((void)0)
 	#define NIX_PRINTF_ERROR(STR_FMT, ...)			((void)0)
@@ -166,12 +175,12 @@
 //-- AUDIO BUFFERS
 //-------------------------------
 typedef enum ENNixBufferState_ {
-	ENNixBufferState_Free = 50,				//Empty, data was played or waiting for data capture
-	ENNixBufferState_LoadedForPlay,			//Filled with data but not attached to source queue
-	ENNixBufferState_AttachedForPlay,		//Filled with data and attached to source queue
+	ENNixBufferState_Free = 50				//Empty, data was played or waiting for data capture
+	, ENNixBufferState_LoadedForPlay		//Filled with data but not attached to source queue
+	, ENNixBufferState_AttachedForPlay		//Filled with data and attached to source queue
 	//
-	ENNixBufferState_AttachedForCapture,	//Filled with data and attached to capture queue
-	ENNixBufferState_LoadedWithCapture		//Filled with data but not attached to capture queue
+	, ENNixBufferState_AttachedForCapture	//Filled with data and attached to capture queue
+	, ENNixBufferState_LoadedWithCapture	//Filled with data but not attached to capture queue
 	#ifdef NIX_MSWAIT_BEFORE_DELETING_BUFFERS
 	, ENNixBufferState_WaitingForDeletion	//The buffer was unqueued and is waiting for deletion (OpenAL gives error when deleting a buffer inmediately after unqueue)
 	#endif
@@ -269,6 +278,7 @@ typedef struct STNix_source_ {
 typedef struct STNix_EngineObjetcs_ {
 	NixUI32				maskCapabilities;
 	#ifdef NIX_OPENAL
+	NixBOOL				contextALIsCurrent;
 	ALCcontext*			contextAL;				//OpenAL specific
 	ALCdevice*			deviceAL;				//OpenAL specific
 	#elif defined(NIX_OPENSL)
@@ -693,6 +703,7 @@ void __nixSrcQueueClear(STNix_EngineObjetcs* eng, STNix_source* src, const NixUI
 	#ifdef NIX_OPENAL
 	if(src->sourceType == ENNixSourceType_Stream){
 		__nixSrcQueueRemoveBuffersOldest(eng, src, sourceIndex, src->queueBuffIndexesUse);
+		src->buffStreamUnqueuedCount += src->queueBuffIndexesUse;
 	} else if(src->sourceType == ENNixSourceType_Static){
 		NIX_ASSERT(src->queueBuffIndexesUse == 1)
 		alSourcei(src->idSourceAL, AL_BUFFER, AL_NONE); VERIFICA_ERROR_AL("alSourcei(AL_BUFFER)");
@@ -789,9 +800,10 @@ NixUI8 nixInit(STNix_Engine* engAbs, const NixUI16 pregeneratedSources){
 	STNix_EngineObjetcs* eng;		NIX_MALLOC(eng, STNix_EngineObjetcs, sizeof(STNix_EngineObjetcs), "STNix_EngineObjetcs")
 	engAbs->o						= eng;
 	#ifdef NIX_OPENAL
-	eng->contextAL			= NULL;
-	eng->deviceAL			= NULL;
-	eng->deviceCaptureAL		= NULL;
+	eng->contextALIsCurrent			= NIX_FALSE;
+	eng->contextAL					= NULL;
+	eng->deviceAL					= NULL;
+	eng->deviceCaptureAL			= NULL;
 	eng->captureMainBufferBytesCount	= 0;
 	#elif defined(NIX_OPENSL)
 	eng->slObject					= NULL;
@@ -842,13 +854,14 @@ NixUI8 nixInit(STNix_Engine* engAbs, const NixUI16 pregeneratedSources){
 			if(alcMakeContextCurrent(eng->contextAL)==AL_FALSE){
 				NIX_PRINTF_ERROR("OpenAL::alcMakeContextCurrent failed\n");
 			} else {
+				eng->contextALIsCurrent			= NIX_TRUE;
 				//Masc of capabilities
 				eng->maskCapabilities			|= (alcIsExtensionPresent(eng->deviceAL, "ALC_EXT_CAPTURE")!=ALC_FALSE || alcIsExtensionPresent(eng->deviceAL, "ALC_EXT_capture")!=ALC_FALSE) ? NIX_CAP_AUDIO_CAPTURE : 0;
 				eng->maskCapabilities			|= (alIsExtensionPresent("AL_EXT_STATIC_BUFFER")!=AL_FALSE) ? NIX_CAP_AUDIO_STATIC_BUFFERS : 0;
 				eng->maskCapabilities			|= (alIsExtensionPresent("AL_EXT_OFFSET")!=AL_FALSE) ? NIX_CAP_AUDIO_SOURCE_OFFSETS : 0;
 				//Pregenerate reusable sources
 				{
-					NixUI16 sourcesCreated= 0;
+					NixUI16 sourcesCreated = 0;
 					while(sourcesCreated < pregeneratedSources){
 						ALuint idFuenteAL; alGenSources(1, &idFuenteAL); //el ID=0 es valido en OpenAL (no usar '0' para validar los IDs)
 						if(alGetError()!=AL_NONE){
@@ -1063,6 +1076,7 @@ void nixFinalize(STNix_Engine* engAbs){
 	if(alcMakeContextCurrent(NULL)==AL_FALSE){
 		NIX_PRINTF_ERROR("alcMakeContextCurrent(NULL) failed\n");
 	} else {
+		eng->contextALIsCurrent = NIX_FALSE;
 		alcDestroyContext(eng->contextAL); VERIFICA_ERROR_AL("alcDestroyContext");
 		if(alcCloseDevice(eng->deviceAL)==AL_FALSE){
 			NIX_PRINTF_ERROR("alcCloseDevice failed\n");
@@ -1084,24 +1098,70 @@ void nixFinalize(STNix_Engine* engAbs){
 	//
 	NIX_FREE(eng)
 	engAbs->o = NULL;
-	
 }
 
-void nixGetContext(STNix_Engine* engAbs, void* dest){
+//
+
+NixBOOL nixContextIsActive(STNix_Engine* engAbs){
 	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
-	#ifdef NIX_OPENAL
+	NixBOOL r = NIX_FALSE;
+#	ifdef NIX_OPENAL
+	r = eng->contextALIsCurrent;
+#	elif defined(NIX_OPENSL)
+	r = NIX_TRUE;
+#	endif
+	return r;
+}
+
+NixBOOL nixContextActivate(STNix_Engine* engAbs){
+	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
+	NixBOOL r = NIX_FALSE;
+#	ifdef NIX_OPENAL
+	if(alcMakeContextCurrent(eng->contextAL) == AL_FALSE){
+		NIX_PRINTF_ERROR("OpenAL::alcMakeContextCurrent(context) failed\n");
+	} else {
+		eng->contextALIsCurrent = NIX_TRUE;
+		r = NIX_TRUE;
+	}
+#	elif defined(NIX_OPENSL)
+	r = NIX_TRUE;
+#	endif
+	return r;
+}
+
+NixBOOL nixContextDeactivate(STNix_Engine* engAbs){
+	NixBOOL r = NIX_FALSE;
+#	ifdef NIX_OPENAL
+	if(alcMakeContextCurrent(NULL) == AL_FALSE){
+		NIX_PRINTF_ERROR("OpenAL::alcMakeContextCurrent(NULL) failed\n");
+	} else {
+		STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
+		eng->contextALIsCurrent = NIX_FALSE;
+		r = NIX_TRUE;
+	}
+#	elif defined(NIX_OPENSL)
+	r = NIX_TRUE;
+#	endif
+	return r;
+}
+
+/*void nixGetContext(STNix_Engine* engAbs, void* dest){
+	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
+#	ifdef NIX_OPENAL
 	//The pointer must be a "ALCcontext**"
 	memcpy(dest, &eng->contextAL, sizeof(eng->contextAL));
-	#elif defined(NIX_OPENSL)
+#	elif defined(NIX_OPENSL)
 	//The pointer must be a "SLEngineItf*"
 	memcpy(dest, &eng->slEngine, sizeof(eng->slEngine));
-	#endif
-}
+#	endif
+}*/
+
+//
 
 void nixTick(STNix_Engine* engAbs){
 	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
 	//Delete buffers
-	#ifdef NIX_MSWAIT_BEFORE_DELETING_BUFFERS
+#	ifdef NIX_MSWAIT_BEFORE_DELETING_BUFFERS
 	{
 		NixUI16 i; const NixUI16 use = eng->buffersArrUse;
 		for(i=1; i<use; i++){
@@ -1114,18 +1174,18 @@ void nixTick(STNix_Engine* engAbs){
 			}
 		}
 	}
-	#endif
+#	endif
 	//
-	#ifdef NIX_OPENAL
+#	ifdef NIX_OPENAL
 	if(eng->deviceCaptureAL){
 		__nixCaptureOpenALMoveSamplesToBuffers(engAbs); //OpenAL specific
 	}
 	__nixSreamsOpenALRemoveProcecedBuffers(engAbs); //OpenAL specific
-	#elif defined(NIX_OPENSL)
+#	elif defined(NIX_OPENSL)
 	if(eng->buffersCaptureArrSize!=0 && eng->buffersCaptureArrFilledCount!=0 && eng->buffersCaptureCallback!=NULL){
 		__nixCaptureOpenSLConsumeFilledBuffers(engAbs);
 	}
-	#endif
+#	endif
 	//STREAMS: notifify recently played & unattached buffers.
 	{
 		NixUI16 iSrc; const NixUI16 useSrc = eng->sourcesArrUse;
@@ -1133,19 +1193,19 @@ void nixTick(STNix_Engine* engAbs){
 			STNix_source* source = &eng->sourcesArr[iSrc];
 			if(source->regInUse && source->retainCount!=0){
 				//if(source->sourceType==ENNixSourceType_Stream){ //Do not validate 'sourceType' because when all buffers are removed from source, it is restored to 'typeUndefined', (ex: when a 'tick' takes too long)
-					const NixUI16 unqueuedCount = source->buffStreamUnqueuedCount; //Create and evaluate a copy variable, in case another thread modify the value
-					if(unqueuedCount != 0){
-						NIX_PRINTF_INFO("Queue, removing ant invoquien callback for %d unqueued buffers.\n", unqueuedCount);
-						//OpenSL specific, remove from queue (this allows execution thread control)
-						#ifdef NIX_OPENSL
-						__nixSrcQueueRemoveBuffersOldest(eng, source, iSrc, unqueuedCount);
-						#endif
-						//Callback
-						if(source->bufferUnqueuedCallback!=NULL){ (*source->bufferUnqueuedCallback)(engAbs, source->bufferUnqueuedCallbackData, iSrc, unqueuedCount); }
-						//
-						NIX_ASSERT(unqueuedCount <= source->buffStreamUnqueuedCount)
-						source->buffStreamUnqueuedCount -= unqueuedCount;
-					}
+				const NixUI16 unqueuedCount = source->buffStreamUnqueuedCount; //Create and evaluate a copy variable, in case another thread modify the value
+				if(unqueuedCount != 0){
+					NIX_PRINTF_INFO("Queue, removing and invoquing callback for %d unqueued buffers.\n", unqueuedCount);
+					//OpenSL specific, remove from queue (this allows execution thread control)
+#					ifdef NIX_OPENSL
+					__nixSrcQueueRemoveBuffersOldest(eng, source, iSrc, unqueuedCount);
+#					endif
+					//Callback
+					if(source->bufferUnqueuedCallback!=NULL){ (*source->bufferUnqueuedCallback)(engAbs, source->bufferUnqueuedCallbackData, iSrc, unqueuedCount); }
+					//
+					NIX_ASSERT(unqueuedCount <= source->buffStreamUnqueuedCount)
+					source->buffStreamUnqueuedCount -= unqueuedCount;
+				}
 				//}
 			}
 		}
@@ -1635,6 +1695,126 @@ NixBOOL nixSourceEmptyQueue(STNix_Engine* engAbs, const NixUI16 sourceIndex){
 		return NIX_TRUE;
 	} NIX_GET_SOURCE_END
 	return NIX_FALSE;
+}
+
+void nixDbgPrintSourcesStatus(STNix_Engine* engAbs){
+	STNix_EngineObjetcs* eng = (STNix_EngineObjetcs*)engAbs->o;
+	//Sources status
+	/*{
+		int i, found = 0; const int count = eng->sourcesArrUse;
+		NIX_PRINTF_ALLWAYS("--- NIXTLA SOURCES STATUS.\n");
+		for(i = 0; i < count; i++){
+			const STNix_source* src = &eng->sourcesArr[i];
+			if(src->regInUse){
+#			ifdef NIX_OPENAL
+				ALint sourceState;
+				alGetSourcei(src->idSourceAL, AL_SOURCE_STATE, &sourceState);	VERIFICA_ERROR_AL("alGetSourcei(AL_SOURCE_STATE)");
+				switch (sourceState) {
+					case AL_INITIAL:
+						NIX_PRINTF_ALLWAYS("Src #%d (al %d), state 'INITIAL' (%d retentions).\n", (i + 1), src->idSourceAL, src->retainCount);
+						break;
+					case AL_PLAYING:
+						NIX_PRINTF_ALLWAYS("Src #%d (al %d), state 'PLAYING' (%d retentions).\n", (i + 1), src->idSourceAL, src->retainCount);
+						break;
+					case AL_PAUSED:
+						NIX_PRINTF_ALLWAYS("Src #%d (al %d), state 'PAUSED' (%d retentions).\n", (i + 1), src->idSourceAL, src->retainCount);
+						break;
+					case AL_STOPPED:
+						NIX_PRINTF_ALLWAYS("Src #%d (al %d), state 'STOPPED' (%d retentions).\n", (i + 1), src->idSourceAL, src->retainCount);
+						break;
+					default:
+						NIX_PRINTF_ALLWAYS("Src #%d (al %d), state UNKNOWN (%d retentions).\n", (i + 1), src->idSourceAL, src->retainCount);
+						break;
+				}
+				//Source buffers
+				{
+					int i; const int count = src->queueBuffIndexesUse;
+					for(i = 0; i < count; i++){
+						const NixUI16 buffIdx = src->queueBuffIndexes[i];
+						NIX_ASSERT(buffIdx < eng->buffersArrUse)
+						const STNix_bufferAL* buff = &eng->buffersArr[buffIdx];
+						NIX_ASSERT(buff->regInUse)
+						const STNix_bufferDesc* buffDesc = &buff->bufferDesc;
+						switch (buffDesc->state) {
+							case ENNixBufferState_Free:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state FREE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+							case ENNixBufferState_LoadedForPlay:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state LOADED_FOR_PLAY (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+							case ENNixBufferState_AttachedForPlay:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state ATACHED_FOR_PLAY (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+							case ENNixBufferState_AttachedForCapture:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state ATACHED_FOR_CAPTURE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+							case ENNixBufferState_LoadedWithCapture:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state LOADED_WITH_CAPTURE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+#						ifdef NIX_MSWAIT_BEFORE_DELETING_BUFFERS
+							case ENNixBufferState_WaitingForDeletion:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state WAITING_FOR_DELETION (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+#						endif
+							default:
+								NIX_PRINTF_ALLWAYS("   + Buff #%d (al %d), state UNKNOWN (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+								break;
+						}
+					}
+				}
+#			endif
+				found++;
+			}
+		}
+		NIX_PRINTF_ALLWAYS("--- %d NIXTLA SOURCES FOUND.\n", found);
+	}
+	//Buffers status
+	{
+		int i, found = 0; const int count = eng->buffersArrUse;
+		NIX_PRINTF_ALLWAYS("--- NIXTLA BUFFERS STATUS.\n");
+		for(i = 0; i < count; i++){
+			const STNix_bufferAL* buff = &eng->buffersArr[i];
+			if(buff->regInUse){
+#			ifdef NIX_OPENAL
+				const STNix_bufferDesc* buffDesc = &buff->bufferDesc;
+				switch (buffDesc->state) {
+					case ENNixBufferState_Free:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state FREE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+					case ENNixBufferState_LoadedForPlay:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state LOADED_FOR_PLAY (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+					case ENNixBufferState_AttachedForPlay:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state ATACHED_FOR_PLAY (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+					case ENNixBufferState_AttachedForCapture:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state ATACHED_FOR_CAPTURE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+					case ENNixBufferState_LoadedWithCapture:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state LOADED_WITH_CAPTURE (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+#						ifdef NIX_MSWAIT_BEFORE_DELETING_BUFFERS
+					case ENNixBufferState_WaitingForDeletion:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state WAITING_FOR_DELETION (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+#						endif
+					default:
+						NIX_PRINTF_ALLWAYS("Buff #%d (al %d), state UNKNOWN (%d retentions).\n", (i + 1), buff->idBufferAL, buff->retainCount);
+						break;
+				}
+#			endif
+				found++;
+			}
+		}
+		NIX_PRINTF_ALLWAYS("--- %d NIXTLA BUFFERS FOUND.\n", found);
+	}*/
+	//CAPTURE
+	/*{
+		NIX_PRINTF_ALLWAYS("--- CAPTURE .\n");
+		NIX_PRINTF_ALLWAYS("   In progress: %d.\n", eng->captureInProgess);
+		NIX_PRINTF_ALLWAYS("   Filled buffers: %d.\n", eng->buffersCaptureArrFilledCount);
+		NIX_PRINTF_ALLWAYS("--- CAPTURE .\n");
+	}*/
 }
 
 NixBOOL nixSourceHaveBuffer(STNix_Engine* engAbs, const NixUI16 sourceIndex, const NixUI16 bufferIndex){
