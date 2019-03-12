@@ -11,6 +11,7 @@
 
 #include "nixtla-audio.h"
 #include <stdio.h>
+#include <malloc.h>
 
 int loadDataFromWavFile(const char* pathToWav, STNix_audioDesc* audioDesc, NixUI8** audioData, NixUI32* audioDataBytes){
 	int success = 0;
