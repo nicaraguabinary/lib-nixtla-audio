@@ -1,4 +1,4 @@
-CFLAGS=-I../../include
+CFLAGS="-I../../include -fPIC"
 
 libnixtla-audio.so: nixtla-audio.o
-	$(CC) -shared $< -o $@
+	$(CC) -shared $(CFLAGS) $< -o $@
